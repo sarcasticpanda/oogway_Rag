@@ -2,11 +2,11 @@
 
 <div align="center">
 
+![Main Interface](material/Screenshot%202026-09-17%20093533.png)
 
+**AI-powered Product & Growth Assistant grounded in Lenny's Podcast transcripts - A take home assignment**
 
-**AI-powered Product & Growth Assistant grounded in Lenny's Podcast transcripts A take home assignment**
-
-[Quick Start](#-quick-start) • [Features](#-features) • [Architecture](#-architecture) • [Documentation](#-documentation)
+[Quick Start](#-quick-start) • [Features](#-features) • [Screenshots](#-screenshots) • [Architecture](#-architecture) • [Documentation](#-documentation)
 
 </div>
 
@@ -76,7 +76,35 @@ Lenny Growth Assistant is an intelligent chat application that helps you learn a
 
 ---
 
-##  Features
+## 📸 Screenshots
+
+### Main Chat Interface
+![Chat Interface](material/Screenshot%202026-09-17%20093533.png)
+*Clean, intuitive interface with real-time AI responses grounded in Lenny's podcast knowledge*
+
+### Artifact Generation
+![Artifacts View](material/Screenshot%202026-09-17%20093543.png)
+*Generate and manage various types of content artifacts including documents, code, and essays*
+
+### Knowledge Base Management
+![Knowledge Base](material/Screenshot%202026-09-17%20093559.png)
+*Upload and manage custom documents, view ingested podcast transcripts*
+
+### Multi-Model AI Support
+![Model Selection](material/Screenshot%202026-09-17%20093637.png)
+*Switch between different AI providers (OpenAI, Anthropic, Groq, Ollama) on-the-fly*
+
+### Session History
+![Session Management](material/Screenshot%202026-09-17%20093822.png)
+*Browse and resume previous conversations organized by date*
+
+### Settings & Configuration
+![Settings Panel](material/Screenshot%202026-09-17%20093454.png)
+*Configure AI models, manage API keys, and customize your experience*
+
+---
+
+## ✨ Features
 
 ### 💬 Intelligent Chat Interface
 - Natural language conversations about product and growth
