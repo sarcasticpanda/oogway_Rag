@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import desc, delete
+from sqlalchemy import desc, func
 import subprocess
 import os
 import uuid
@@ -109,17 +109,16 @@ async def ingest_uploaded_file(file_path: str, title: str, guest_name: str, db: 
 @router.get("/episodes")
 async def get_episodes(db: AsyncSession = Depends(get_db)):
     """List all ingested episodes"""
-    result = await db.execute(select(Episode).order_by(desc(Episode.created_at)))
-    episodes = result.scalars().all()
+    result = await db.execute(
+        select(Episode, func.count(TranscriptChunk.id).label("chunk_count"))
+        .outerjoin(TranscriptChunk, TranscriptChunk.episode_id == Episode.id)
+        .group_by(Episode.id)
+        .order_by(desc(Episode.created_at))
+    )
+    rows = result.all()
 
     response = []
-    for ep in episodes:
-        # Count chunks for this episode
-        chunk_count = await db.execute(
-            select(TranscriptChunk).where(TranscriptChunk.episode_id == ep.id)
-        )
-        chunk_total = len(chunk_count.scalars().all())
-
+    for ep, chunk_total in rows:
         response.append({
             "id": str(ep.id),
             "title": ep.title,
