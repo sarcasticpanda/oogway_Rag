@@ -111,11 +111,56 @@ async def ingest_transcripts(
                 await db.refresh(episode)
                 total_episodes_created += 1
 
-            # Prepare text chunks for embedding
+            # Prepare text chunks for embedding - RECURSIVE CHUNKING
             chunks_to_insert = []
             texts_to_embed = []
 
-            # 1. Summary chunk
+            def split_into_sentences(text):
+                """Split text into sentences."""
+                import re
+                sentences = re.split(r'(?<=[.!?])\s+', text)
+                return [s.strip() for s in sentences if s.strip()]
+
+            def recursive_chunk(text, min_size=100, max_size=800, overlap=50):
+                """Create multi-scale chunks from text."""
+                chunks = []
+                sentences = split_into_sentences(text)
+                
+                if len(sentences) <= 1:
+                    # Too short, return as-is
+                    chunks.append(text)
+                    return chunks
+                
+                # Build chunks of varying sizes
+                current_chunk = []
+                current_size = 0
+                
+                for i, sentence in enumerate(sentences):
+                    sentence_size = len(sentence)
+                    
+                    if current_size + sentence_size > max_size and current_chunk:
+                        # Yield current chunk
+                        chunk_text = ' '.join(current_chunk)
+                        chunks.append(chunk_text)
+                        
+                        # Start new chunk with overlap
+                        overlap_sentences = [
+                            s for s in current_chunk[-(overlap//20):] 
+                            if s in current_chunk
+                        ][:3]  # Take last 3 sentences as overlap
+                        current_chunk = overlap_sentences + [sentence]
+                        current_size = sum(len(s) for s in current_chunk)
+                    else:
+                        current_chunk.append(sentence)
+                        current_size += sentence_size
+                
+                # Don't forget the last chunk
+                if current_chunk and len(' '.join(current_chunk)) >= min_size:
+                    chunks.append(' '.join(current_chunk))
+                
+                return chunks if chunks else [text]
+
+            # 1. Summary chunk (overview level)
             summary_text = (
                 f"Episode Summary: {guest_name} on Lenny's Podcast.\n"
                 f"{summary}\n"
@@ -128,10 +173,10 @@ async def ingest_transcripts(
                 "text": summary_text,
                 "ts_start": "00:00:00",
                 "ts_end": "00:05:00",
-                "meta": {"type": "summary", "guest": guest_name}
+                "meta": {"type": "summary", "guest": guest_name, "scale": "overview"}
             })
 
-            # 2. Topic chunks - improved chunking for better retrieval
+            # 2. Topic chunks with recursive sub-chunking
             for topic in data.get("topics", []):
                 t_title = topic.get("title", "")
                 t_summary = topic.get("summary", "")
@@ -140,45 +185,40 @@ async def ingest_transcripts(
                 l_start = topic.get("line_start", 0)
                 l_end = topic.get("line_end", 0)
 
-                # Extract full excerpt from raw transcript (no truncation)
+                # Extract excerpt from raw transcript if available
                 excerpt = ""
                 if raw_transcript_lines and l_start < len(raw_transcript_lines):
-                    # Get all lines for this topic, up to a reasonable limit
-                    excerpt_lines = raw_transcript_lines[l_start:min(l_end + 50, l_start + 100)]
+                    # Get more lines for comprehensive context
+                    excerpt_lines = raw_transcript_lines[l_start:min(l_end + 100, l_start + 150)]
                     excerpt = "".join(excerpt_lines).strip()
 
-                # Create comprehensive chunk content
-                chunk_content = (
+                # Create topic-level chunk
+                topic_chunk = (
                     f"Topic: {t_title}\n"
                     f"Timestamp: {ts_start} - {ts_end}\n"
                     f"Summary: {t_summary}\n"
                 )
                 if excerpt:
-                    chunk_content += f"\nTranscript Excerpt:\n{excerpt}"
+                    topic_chunk += f"\nTranscript Excerpt:\n{excerpt}"
                 
-                # Also create a shorter summary-only chunk for quick retrieval
-                summary_chunk = (
-                    f"Topic: {t_title}\n"
-                    f"Summary: {t_summary}\n"
-                )
-                
-                texts_to_embed.append(chunk_content)
+                texts_to_embed.append(topic_chunk)
                 chunks_to_insert.append({
                     "chapter_title": t_title,
-                    "text": chunk_content,
+                    "text": topic_chunk,
                     "ts_start": ts_start,
                     "ts_end": ts_end,
-                    "meta": {"type": "topic_full", "guest": guest_name}
+                    "meta": {"type": "topic_full", "guest": guest_name, "scale": "topic"}
                 })
                 
-                # Add summary-only chunk as well for better recall
-                texts_to_embed.append(summary_chunk)
+                # Add summary-only chunk for quick retrieval
+                summary_only = f"Topic: {t_title}\nSummary: {t_summary}\n"
+                texts_to_embed.append(summary_only)
                 chunks_to_insert.append({
                     "chapter_title": f"{t_title} (Summary)",
-                    "text": summary_chunk,
+                    "text": summary_only,
                     "ts_start": ts_start,
                     "ts_end": ts_end,
-                    "meta": {"type": "topic_summary", "guest": guest_name}
+                    "meta": {"type": "topic_summary", "guest": guest_name, "scale": "topic_summary"}
                 })
 
             # 3. Key insights
