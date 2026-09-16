@@ -25,6 +25,7 @@ interface Message {
   follow_ups?: string[];
   provider?: string;
   model?: string;
+  artifactId?: string;
 }
 
 interface ChatAreaProps {
@@ -34,7 +35,7 @@ interface ChatAreaProps {
   onConfigChange: (c: AppConfig) => void;
 }
 
-function MessageBubble({ msg, onFollowUp }: { msg: Message; onFollowUp?: (q: string) => void }) {
+function MessageBubble({ msg, onFollowUp, onOpenArtifact }: { msg: Message; onFollowUp?: (q: string) => void; onOpenArtifact?: (id: string) => void }) {
   const [copied, setCopied] = useState(false);
   const [citationsOpen, setCitationsOpen] = useState(false);
 
@@ -89,6 +90,11 @@ function MessageBubble({ msg, onFollowUp }: { msg: Message; onFollowUp?: (q: str
             {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
           </button>
           {time && <span className="text-[10px] text-muted-foreground">{time}</span>}
+          {msg.artifactId && (
+            <button onClick={() => onOpenArtifact?.(msg.artifactId!)} className="flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-xs text-primary hover:bg-primary/20">
+              <Box size={12} /> Open artifact
+            </button>
+          )}
 
           {/* Citations toggle */}
           {msg.citations && msg.citations.length > 0 && (
@@ -139,6 +145,10 @@ export default function ChatArea({ sessionId, onSessionCreated, config, onConfig
   const [artifactRailOpen, setArtifactRailOpen] = useState(true);
   const [artifactExpanded, setArtifactExpanded] = useState(false);
   const [artifactMenuOpen, setArtifactMenuOpen] = useState(false);
+  const [sourceSearch, setSourceSearch] = useState('');
+  const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
+  const [sourceScope, setSourceScope] = useState<'all' | 'selected' | 'chat'>('all');
+  const [sourcePickerOpen, setSourcePickerOpen] = useState(false);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
@@ -151,9 +161,14 @@ export default function ChatArea({ sessionId, onSessionCreated, config, onConfig
       const res = await fetch(`${API}/sessions/${sessionId}`);
       if (!res.ok) { setMessages([]); return null; }
       const data = await res.json();
+      let artifactIndex = 0;
       setMessages(data.messages.map((m: any) => ({
-        id: m.id, role: m.role, content: m.content, created_at: m.created_at,
+        id: m.id,
+        role: m.role,
+        content: m.content || (m.message_type === 'artifact' ? 'Artifact created in this chat. Open it below.' : ''),
+        created_at: m.created_at,
         citations: m.citations || [],
+        artifactId: m.message_type === 'artifact' ? data.artifacts?.[artifactIndex++]?.id : undefined,
       })));
       return data;
     },
@@ -167,6 +182,14 @@ export default function ChatArea({ sessionId, onSessionCreated, config, onConfig
       return response.ok ? response.json() : [];
     },
     enabled: Boolean(sessionId),
+  });
+
+  const { data: knowledgeSources = [] } = useQuery<any[]>({
+    queryKey: ['episodes'],
+    queryFn: async () => {
+      const response = await fetch(`${API}/knowledge/episodes`);
+      return response.ok ? response.json() : [];
+    },
   });
 
   useEffect(() => {
@@ -195,6 +218,8 @@ export default function ChatArea({ sessionId, onSessionCreated, config, onConfig
           api_key: config.apiKey || undefined,
           base_url: config.customProviderUrl || undefined,
           user_preferences: (config.responseStyle || config.responseInstructions) ? { response_style: config.responseStyle, instructions: config.responseInstructions } : undefined,
+          source_ids: selectedSourceIds.length ? selectedSourceIds : undefined,
+          source_scope: isArtifactTask ? sourceScope : (selectedSourceIds.length ? 'selected' : 'all'),
           task_type: isArtifactTask ? 'artifact' : 'qa',
         }),
       });
@@ -226,6 +251,7 @@ export default function ChatArea({ sessionId, onSessionCreated, config, onConfig
         follow_ups: data.follow_ups || [],
         provider: data.provider,
         model: data.model,
+        artifactId: data.artifact_id || undefined,
       };
       setMessages(prev => [...prev, assistantMsg]);
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
@@ -253,7 +279,7 @@ export default function ChatArea({ sessionId, onSessionCreated, config, onConfig
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || 'Upload failed');
       queryClient.invalidateQueries({ queryKey: ['episodes'] });
-      setMessages((previous) => [...previous, { role: 'assistant', content: `Knowledge source added: ${data.message}`, created_at: new Date().toISOString() }]);
+      setMessages((previous) => [...previous, { role: 'assistant', content: `Knowledge source added and indexed: ${data.message}`, created_at: new Date().toISOString() }]);
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : 'Upload failed');
     } finally {
@@ -278,6 +304,39 @@ export default function ChatArea({ sessionId, onSessionCreated, config, onConfig
           <input type="text" placeholder="Model" value={config.model}
             onChange={(e) => onConfigChange({ ...config, model: e.target.value })}
             className="bg-secondary px-2.5 py-1 rounded-lg text-xs outline-none w-28 text-foreground placeholder:text-muted-foreground" />
+          <div className="relative hidden md:block">
+            <button type="button" onClick={() => setSourcePickerOpen((open) => !open)} className="cursor-pointer rounded-lg bg-secondary px-2.5 py-1 text-[10px] text-foreground">
+              Sources: {selectedSourceIds.length ? `${selectedSourceIds.length} selected` : 'All'}
+            </button>
+            {sourcePickerOpen && (
+              <div className="absolute right-0 top-8 z-30 max-h-96 w-80 overflow-y-auto rounded-lg border border-border bg-card p-2 shadow-xl">
+              <input value={sourceSearch} onChange={(event) => setSourceSearch(event.target.value)} placeholder="Search documents..." className="mb-2 w-full rounded border border-border bg-secondary px-2 py-1.5 text-xs outline-none" />
+                <div className="mb-2 grid grid-cols-3 gap-1 border-b border-border pb-2">
+                  {([['all', 'All knowledge'], ['selected', 'Selected docs'], ['chat', 'This chat']] as const).map(([scope, label]) => (
+                    <button key={scope} type="button" onClick={() => setSourceScope(scope)} className={`rounded px-1 py-1 text-[10px] ${sourceScope === scope ? 'bg-primary text-primary-foreground' : 'bg-secondary hover:bg-accent'}`}>{label}</button>
+                  ))}
+                </div>
+              <label className="flex items-center gap-2 border-b border-border px-2 py-2 text-xs font-medium">
+                <input type="checkbox" checked={sourceScope === 'all' && selectedSourceIds.length === 0} onChange={() => { setSelectedSourceIds([]); setSourceScope('all'); setSourcePickerOpen(false); }} />
+                Search all sources
+              </label>
+              {knowledgeSources.filter((source: any) => source.title.toLowerCase().includes(sourceSearch.toLowerCase())).map((source: any) => (
+                <label key={source.id} className="flex items-start gap-2 rounded px-2 py-1.5 text-[10px] hover:bg-accent">
+                  <input
+                    type="checkbox"
+                    checked={selectedSourceIds.includes(source.id)}
+                    onChange={(event) => {
+                      setSourceScope(event.target.checked ? 'selected' : (selectedSourceIds.length > 1 ? 'selected' : 'all'));
+                      setSelectedSourceIds((current) => event.target.checked ? [...current, source.id] : current.filter((id) => id !== source.id));
+                    }}
+                  />
+                  <span className="line-clamp-2">{source.title}</span>
+                </label>
+              ))}
+              <button type="button" onClick={() => setSourcePickerOpen(false)} className="mt-2 w-full rounded bg-primary px-2 py-1.5 text-[10px] text-primary-foreground">Done</button>
+            </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -291,8 +350,8 @@ export default function ChatArea({ sessionId, onSessionCreated, config, onConfig
             </p>
           </div>
         ) : (
-          messages.map((m, i) => (
-            <MessageBubble key={i} msg={m} onFollowUp={(q) => sendMessage(q)} />
+            messages.map((m, i) => (
+            <MessageBubble key={i} msg={m} onFollowUp={(q) => sendMessage(q)} onOpenArtifact={async (id) => { const response = await fetch(`${API}/artifacts/${id}`); if (response.ok) { const record = await response.json(); setCurrentArtifact({ ...record, type: record.type || record.artifact_type }); setArtifactRailOpen(true); } }} />
           ))
         )}
 
@@ -346,6 +405,7 @@ export default function ChatArea({ sessionId, onSessionCreated, config, onConfig
                 </button>
                 {artifactMenuOpen && (
                   <div className="border-t border-border p-1">
+                    <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Artifact type</div>
                     {[
                       ['ship30', 'Essay: 1,150-1,350 words'],
                       ['summary', 'Summary of this chat'],
@@ -353,10 +413,33 @@ export default function ChatArea({ sessionId, onSessionCreated, config, onConfig
                       ['checklist', 'Action checklist'],
                       ['html', 'HTML/CSS webpage'],
                     ].map(([kind, label]) => (
-                      <button key={kind} type="button" onClick={() => { setInput(`${input.replace(/@([a-z]*)\s*$/i, '@artifact ')}${kind}: `); setArtifactMenuOpen(false); }} className="block w-full rounded px-3 py-1.5 text-left text-xs hover:bg-accent">
+                      <button key={kind} type="button" onClick={() => { setInput(`${input.replace(/@([a-z]*)\s*$/i, '@artifact ')}${kind}: `); }} className="block w-full rounded px-3 py-1.5 text-left text-xs hover:bg-accent">
                         {label}
                       </button>
                     ))}
+                    <div className="mt-1 border-t border-border px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Use as reference</div>
+                    <div className="grid grid-cols-3 gap-1 px-2 pb-2">
+                      {([['all', 'All knowledge'], ['selected', 'Selected docs'], ['chat', 'This chat']] as const).map(([scope, label]) => (
+                        <button key={scope} type="button" onClick={() => setSourceScope(scope)} className={`rounded px-1 py-1 text-[10px] ${sourceScope === scope ? 'bg-primary text-primary-foreground' : 'bg-secondary hover:bg-accent'}`}>
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {sourceScope === 'selected' && (
+                      <div className="max-h-40 overflow-y-auto border-t border-border px-2 pt-2">
+                        <input value={sourceSearch} onChange={(event) => setSourceSearch(event.target.value)} placeholder="Search documents..." className="mb-2 w-full rounded border border-border bg-secondary px-2 py-1.5 text-xs outline-none" />
+                        {knowledgeSources.filter((source: any) => source.title.toLowerCase().includes(sourceSearch.toLowerCase())).map((source: any) => (
+                          <label key={source.id} className="flex items-start gap-2 rounded px-2 py-1.5 text-[10px] hover:bg-accent">
+                            <input type="checkbox" checked={selectedSourceIds.includes(source.id)} onChange={(event) => { setSourceScope(event.target.checked ? 'selected' : sourceScope); setSelectedSourceIds((current) => event.target.checked ? [...current, source.id] : current.filter((id) => id !== source.id)); }} />
+                            <span className="line-clamp-2">{source.title}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    <div className="border-t border-border px-3 py-2 text-[10px] text-muted-foreground">
+                      {sourceScope === 'selected' ? `${selectedSourceIds.length} document(s) selected` : sourceScope === 'chat' ? 'Uses this conversation' : 'Uses all indexed knowledge'}
+                    </div>
+                    <button type="button" onClick={() => setArtifactMenuOpen(false)} className="mx-2 mb-2 w-[calc(100%-1rem)] rounded bg-primary px-2 py-1.5 text-[10px] text-primary-foreground">Done</button>
                   </div>
                 )}
               </div>

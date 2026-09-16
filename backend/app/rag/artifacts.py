@@ -75,6 +75,7 @@ OR for HTML:
 </artifact>
 
 The artifact will be displayed in a side panel. Keep the main chat response brief and conversational.
+Use the supplied evidence as source material, not as text to copy. Build a coherent deliverable with a clear purpose, useful organization, and explicit source traceability. Never invent details that are absent from the evidence.
 """
     
     if task_type == "ship30":
@@ -89,8 +90,8 @@ For Ship 30 for 30 essays:
 """
 
     if task_type == "html":
-        return base_instructions + "\nPrefer type=\"html\" with self-contained HTML and CSS."
+        return base_instructions + "\nPrefer type=\"html\" with self-contained HTML and CSS. Ensure the body contains the requested deliverable, not just raw source excerpts."
     if task_type in {"summary", "report", "checklist"}:
-        return base_instructions + f"\nCreate a useful {task_type} in Markdown with clear sections and actionable detail."
+        return base_instructions + f"\nCreate a useful {task_type} in Markdown with clear sections, actionable detail, and a short Evidence/Source basis section. For a checklist, turn source requirements into verifiable checklist items; do not add generic filler."
     
     return base_instructions

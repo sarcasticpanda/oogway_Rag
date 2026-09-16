@@ -1,4 +1,4 @@
-import { MessageSquarePlus, FileText, Box, Settings, ChevronLeft, ChevronRight, Trash2, Search, Database, User } from 'lucide-react';
+import { MessageSquarePlus, FileText, Box, Settings, ChevronLeft, ChevronRight, Trash2, Search, Database, User, MoreVertical, Pencil, Download, Copy, X } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useState, useEffect } from 'react';
@@ -25,6 +25,109 @@ interface SidebarProps {
   onNewChat: () => void;
   config: AppConfig;
   onConfigChange: (c: AppConfig) => void;
+}
+
+// Context menu for each session
+function SessionContextMenu({ 
+  session, 
+  currentSessionId, 
+  onSelectSession, 
+  onDelete,
+  onRename,
+  onDuplicate,
+  onExport,
+  onClose 
+}: { 
+  session: Session;
+  currentSessionId: string | null;
+  onSelectSession: (id: string) => void;
+  onDelete: (id: string) => void;
+  onRename: (id: string, newTitle: string) => void;
+  onDuplicate: (id: string) => void;
+  onExport: (id: string) => void;
+  onClose: () => void;
+}) {
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(session.title);
+
+  const handleRenameSubmit = async () => {
+    if (renameValue.trim() && renameValue !== session.title) {
+      await onRename(session.id, renameValue.trim());
+    }
+    setIsRenaming(false);
+  };
+
+  return (
+    <div className="relative">
+      <button
+        onClick={(e) => e.stopPropagation()}
+        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-accent rounded transition-all"
+        title="More options"
+      >
+        <MoreVertical size={12} />
+      </button>
+      
+      {/* Context Menu */}
+      <div 
+        className="absolute left-full top-0 ml-1 w-48 bg-card border border-border rounded-lg shadow-lg z-20 py-1"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {isRenaming ? (
+          <div className="px-2 py-1">
+            <input
+              type="text"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleRenameSubmit();
+                if (e.key === 'Escape') setIsRenaming(false);
+              }}
+              autoFocus
+              className="w-full px-2 py-1 text-xs bg-secondary border border-border rounded outline-none"
+            />
+            <div className="flex gap-1 mt-1">
+              <button onClick={handleRenameSubmit} className="text-xs text-primary hover:underline">OK</button>
+              <button onClick={() => setIsRenaming(false)} className="text-xs text-muted-foreground hover:underline">Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <button
+              onClick={() => { onSelectSession(session.id); onClose(); }}
+              className="w-full text-left px-3 py-1.5 text-xs hover:bg-accent flex items-center gap-2"
+            >
+              Open
+            </button>
+            <button
+              onClick={() => setIsRenaming(true)}
+              className="w-full text-left px-3 py-1.5 text-xs hover:bg-accent flex items-center gap-2"
+            >
+              <Pencil size={12} /> Rename
+            </button>
+            <button
+              onClick={() => { onDuplicate(session.id); onClose(); }}
+              className="w-full text-left px-3 py-1.5 text-xs hover:bg-accent flex items-center gap-2"
+            >
+              <Copy size={12} /> Duplicate
+            </button>
+            <button
+              onClick={() => { onExport(session.id); onClose(); }}
+              className="w-full text-left px-3 py-1.5 text-xs hover:bg-accent flex items-center gap-2"
+            >
+              <Download size={12} /> Export
+            </button>
+            <div className="border-t border-border my-1" />
+            <button
+              onClick={() => { onDelete(session.id); onClose(); }}
+              className="w-full text-left px-3 py-1.5 text-xs hover:bg-destructive/10 text-destructive flex items-center gap-2"
+            >
+              <Trash2 size={12} /> Delete
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function groupByDate(sessions: Session[]) {
@@ -57,18 +160,16 @@ export default function Sidebar({ isOpen, onToggle, currentSessionId, onSelectSe
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
 
-  // Keyboard shortcut: Ctrl+N / Cmd+N creates a new chat
+  // Close context menu on outside click
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
-        e.preventDefault();
-        onNewChat();
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [onNewChat]);
+    const handleClick = () => setContextMenu(null);
+    if (contextMenu) {
+      window.addEventListener('click', handleClick);
+      return () => window.removeEventListener('click', handleClick);
+    }
+  }, [contextMenu]);
 
   const { data: sessions = [] } = useQuery<Session[]>({
     queryKey: ['sessions'],
@@ -85,11 +186,81 @@ export default function Sidebar({ isOpen, onToggle, currentSessionId, onSelectSe
   );
   const groups = groupByDate(filtered);
 
-  const deleteSession = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const deleteSession = async (id: string) => {
     await fetch(`${API}/sessions/${id}`, { method: 'DELETE' });
     queryClient.invalidateQueries({ queryKey: ['sessions'] });
     if (currentSessionId === id) onNewChat();
+  };
+
+  const renameSession = async (id: string, newTitle: string) => {
+    await fetch(`${API}/sessions/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: newTitle }),
+    });
+    queryClient.invalidateQueries({ queryKey: ['sessions'] });
+  };
+
+  const duplicateSession = async (id: string) => {
+    const session = sessions.find(s => s.id === id);
+    if (!session) return;
+    
+    // Create a new session with similar title
+    const newTitle = `${session.title} (Copy)`;
+    const newSession = await fetch(`${API}/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        title: newTitle,
+        active_provider: session.active_provider,
+        active_model: session.active_model,
+      }),
+    });
+    const created = await newSession.json();
+    
+    queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    onSelectSession(created.id);
+  };
+
+  const exportSession = async (id: string) => {
+    const res = await fetch(`${API}/sessions/${id}`);
+    const data = await res.json();
+    
+    // Create markdown content
+    let content = `# ${data.session.title}\n\n`;
+    content += `Created: ${new Date(data.session.created_at).toLocaleString()}\n`;
+    content += `Messages: ${data.messages.length}\n\n`;
+    content += `---\n\n`;
+    
+    for (const msg of data.messages) {
+      const role = msg.role === 'user' ? 'User' : 'Assistant';
+      content += `## ${role}\n\n${msg.content}\n\n`;
+      if (msg.citations && msg.citations.length > 0) {
+        content += `**Sources:**\n`;
+        for (const cit of msg.citations) {
+          content += `- ${cit.episode_title}\n`;
+        }
+        content += `\n`;
+      }
+      content += `---\n\n`;
+    }
+    
+    // Download file
+    const blob = new Blob([content], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${data.session.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleContextMenu = (e: React.MouseEvent, sessionId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ sessionId, x: e.clientX, y: e.clientY });
   };
 
   if (!isOpen) {
@@ -151,17 +322,37 @@ export default function Sidebar({ isOpen, onToggle, currentSessionId, onSelectSe
               {group.label}
             </div>
             {group.items.map(s => (
-              <button key={s.id} onClick={() => onSelectSession(s.id)}
-                className={`group flex items-center justify-between w-full px-2.5 py-1.5 rounded-lg text-sm transition-colors mb-0.5 ${
-                  currentSessionId === s.id ? 'bg-accent font-medium' : 'hover:bg-accent/50'
-                }`}>
-                <span className="truncate text-left flex-1">{s.title || 'New Chat'}</span>
-                <button onClick={(e) => deleteSession(s.id, e)}
-                  className="opacity-0 group-hover:opacity-100 p-1 hover:text-destructive transition-all"
-                  title="Delete">
-                  <Trash2 size={12} />
+              <div 
+                key={s.id} 
+                className="group flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-sm transition-colors mb-0.5 hover:bg-accent/50"
+                style={{ 
+                  backgroundColor: currentSessionId === s.id ? 'var(--accent)' : undefined,
+                  fontWeight: currentSessionId === s.id ? 500 : undefined
+                }}
+              >
+                <button 
+                  onClick={() => onSelectSession(s.id)}
+                  className="flex-1 text-left truncate"
+                >
+                  {s.title || 'New Chat'}
                 </button>
-              </button>
+                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleContextMenu(e, s.id); }}
+                    className="p-0.5 hover:bg-accent rounded transition-colors"
+                    title="More options"
+                  >
+                    <MoreVertical size={12} />
+                  </button>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); deleteSession(s.id); }}
+                    className="p-0.5 hover:text-destructive transition-colors"
+                    title="Delete"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              </div>
             ))}
           </div>
         ))}
@@ -190,6 +381,25 @@ export default function Sidebar({ isOpen, onToggle, currentSessionId, onSelectSe
         config={config} 
         onConfigChange={onConfigChange} 
       />
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <div
+          className="fixed z-50"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <SessionContextMenu
+            session={sessions.find(s => s.id === contextMenu.sessionId)!}
+            currentSessionId={currentSessionId}
+            onSelectSession={(id) => { onSelectSession(id); setContextMenu(null); }}
+            onDelete={async (id) => { await deleteSession(id); setContextMenu(null); }}
+            onRename={async (id, title) => { await renameSession(id, title); setContextMenu(null); }}
+            onDuplicate={async (id) => { await duplicateSession(id); setContextMenu(null); }}
+            onExport={async (id) => { await exportSession(id); setContextMenu(null); }}
+            onClose={() => setContextMenu(null)}
+          />
+        </div>
+      )}
     </div>
   );
 }

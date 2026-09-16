@@ -91,6 +91,10 @@ async def ingest_transcripts(
 
             if existing_ep:
                 episode = existing_ep
+                # Rebuild this episode's chunks so repeated ingestion cannot
+                # duplicate evidence in vector retrieval.
+                await db.execute(delete(TranscriptChunk).where(TranscriptChunk.episode_id == episode.id))
+                await db.commit()
             else:
                 episode = Episode(
                     title=title,
@@ -127,7 +131,7 @@ async def ingest_transcripts(
                 "meta": {"type": "summary", "guest": guest_name}
             })
 
-            # 2. Topic chunks
+            # 2. Topic chunks - improved chunking for better retrieval
             for topic in data.get("topics", []):
                 t_title = topic.get("title", "")
                 t_summary = topic.get("summary", "")
@@ -136,26 +140,45 @@ async def ingest_transcripts(
                 l_start = topic.get("line_start", 0)
                 l_end = topic.get("line_end", 0)
 
-                # Extract excerpt from raw transcript if available
+                # Extract full excerpt from raw transcript (no truncation)
                 excerpt = ""
                 if raw_transcript_lines and l_start < len(raw_transcript_lines):
-                    excerpt_lines = raw_transcript_lines[l_start:min(l_end, l_start + 40)]
+                    # Get all lines for this topic, up to a reasonable limit
+                    excerpt_lines = raw_transcript_lines[l_start:min(l_end + 50, l_start + 100)]
                     excerpt = "".join(excerpt_lines).strip()
 
+                # Create comprehensive chunk content
                 chunk_content = (
                     f"Topic: {t_title}\n"
+                    f"Timestamp: {ts_start} - {ts_end}\n"
                     f"Summary: {t_summary}\n"
                 )
                 if excerpt:
-                    chunk_content += f"Transcript Excerpt:\n{excerpt[:800]}"
-
+                    chunk_content += f"\nTranscript Excerpt:\n{excerpt}"
+                
+                # Also create a shorter summary-only chunk for quick retrieval
+                summary_chunk = (
+                    f"Topic: {t_title}\n"
+                    f"Summary: {t_summary}\n"
+                )
+                
                 texts_to_embed.append(chunk_content)
                 chunks_to_insert.append({
                     "chapter_title": t_title,
                     "text": chunk_content,
                     "ts_start": ts_start,
                     "ts_end": ts_end,
-                    "meta": {"type": "topic", "guest": guest_name}
+                    "meta": {"type": "topic_full", "guest": guest_name}
+                })
+                
+                # Add summary-only chunk as well for better recall
+                texts_to_embed.append(summary_chunk)
+                chunks_to_insert.append({
+                    "chapter_title": f"{t_title} (Summary)",
+                    "text": summary_chunk,
+                    "ts_start": ts_start,
+                    "ts_end": ts_end,
+                    "meta": {"type": "topic_summary", "guest": guest_name}
                 })
 
             # 3. Key insights

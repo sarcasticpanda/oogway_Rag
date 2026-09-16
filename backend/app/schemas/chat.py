@@ -11,6 +11,8 @@ class ChatRequest(BaseModel):
     base_url: Optional[str] = None
     task_type: Optional[str] = "qa"  # "qa", "ship30", "artifact"
     user_preferences: Optional[Dict[str, Any]] = None
+    source_ids: Optional[List[UUID]] = None
+    source_scope: Optional[str] = "all"  # all, selected, chat
 
 class Ship30Request(BaseModel):
     session_id: Optional[UUID] = None

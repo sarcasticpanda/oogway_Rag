@@ -13,6 +13,7 @@ from sqlalchemy import select
 from app.db import get_db
 from app.models.session import Session
 from app.models.message import Message
+from app.models.episode import Episode
 from app.schemas.chat import ChatRequest
 from app.rag.retrieve import retrieve_context
 from app.rag.prompts import build_rag_messages, extract_follow_up_questions, get_artifact_instructions
@@ -57,12 +58,21 @@ async def chat_endpoint(request: ChatRequest, db: AsyncSession = Depends(get_db)
     history_rows = msg_res.scalars().all()
     history = [{"role": m.role, "content": m.content} for m in history_rows]
 
-    # 3. Retrieve relevant Lenny podcast transcripts
-    context_str, citations, is_grounded = await retrieve_context(request.message, db, top_k=6)
+    # 3. Retrieve evidence. Artifacts need a wider source-scoped evidence set
+    # than ordinary Q&A so the model can synthesize the selected document.
+    is_artifact_request = should_generate_artifact(request.message) or request.task_type == "artifact"
+    retrieval_query = request.message
+    if request.source_scope == "chat":
+        retrieval_query = "\n".join(turn["content"] for turn in history[-8:] if turn["role"] in {"user", "assistant"})
+        retrieval_query = f"{retrieval_query}\n{request.message}".strip()
+    context_str, citations, is_grounded = await retrieve_context(
+        retrieval_query,
+        db,
+        top_k=12 if is_artifact_request else 6,
+        source_ids=request.source_ids if request.source_scope == "selected" else None,
+    )
 
     # 4. Build prompt
-    is_artifact_request = should_generate_artifact(request.message) or request.task_type == "artifact"
-    
     prompt_messages = build_rag_messages(
         query=request.message,
         context=context_str,
@@ -74,7 +84,14 @@ async def chat_endpoint(request: ChatRequest, db: AsyncSession = Depends(get_db)
     if is_artifact_request:
         kind_match = re.search(r"@(ship30|artifact)\s*(ship30|summary|report|checklist|html)?", request.message.lower())
         task_type = "ship30" if "@ship30" in request.message.lower() else (kind_match.group(2) if kind_match and kind_match.group(2) else "general")
-        prompt_messages.append({"role": "system", "content": get_artifact_prompt_instructions(task_type)})
+        subtype_match = re.search(r"(?:html|markdown)\s*:\s*(essay|summary|report|checklist)", request.message.lower())
+        requested_deliverable = subtype_match.group(1) if subtype_match else task_type
+        selected_titles = []
+        if request.source_scope == "selected" and request.source_ids:
+            selected_result = await db.execute(select(Episode.title).where(Episode.id.in_(request.source_ids)))
+            selected_titles = [row[0] for row in selected_result.all()]
+        source_scope = ", ".join(selected_titles) if selected_titles else ("the current conversation" if request.source_scope == "chat" else "all retrieved knowledge sources")
+        prompt_messages.append({"role": "system", "content": get_artifact_prompt_instructions(task_type) + f"\nREFERENCE MODE: {request.source_scope}.\nSOURCE SCOPE: Use only {source_scope}.\nREQUESTED DELIVERABLE: {requested_deliverable}.\nUSER REQUEST: {request.message}\nTransform the evidence into the requested deliverable; do not merely paste or paraphrase isolated chunks. For a JD, extract only requirements actually present and label recommendations as recommendations. Do not invent technologies, names, timelines, or requirements. Every substantive claim must be traceable to the supplied evidence."})
 
     # 5. Execute LLM completion
     provider_name = request.provider or session.active_provider
@@ -94,18 +111,54 @@ async def chat_endpoint(request: ChatRequest, db: AsyncSession = Depends(get_db)
         api_key=request.api_key,
         base_url=request.base_url,
     )
+    # Resolve the model actually used (provider defaults apply when None)
+    resolved_model = getattr(chat_provider, "model", None) or model_name
 
-    try:
-        raw_response = await chat_provider.complete(prompt_messages)
-    except Exception as e:
-        # Fallback to local or give friendly error
+    # Try the requested provider, with fallback to Ollama if available
+    raw_response = None
+    providers_to_try = [provider_name]
+    if provider_name.lower() != "ollama":
+        providers_to_try.append("ollama")
+    
+    last_error = None
+    for try_provider in providers_to_try:
+        try:
+            fp = AIProviderFactory.get_chat_provider(
+                provider=try_provider,
+                model=model_name,
+                api_key=request.api_key,
+                base_url=request.base_url,
+            )
+            raw_response = await fp.complete(prompt_messages)
+            # Update final provider if we fell back
+            if try_provider != provider_name:
+                provider_name = try_provider
+            break
+        except Exception as e:
+            last_error = e
+            continue
+    
+    if raw_response is None:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Error connecting to AI Provider ({provider_name}): {str(e)}"
+            detail=f"AI provider unavailable. Tried: {', '.join(providers_to_try)}. Last error: {last_error}"
         )
 
     # 6. Extract artifact if present
     cleaned_response, artifact_data = extract_artifact_from_response(raw_response)
+    if is_artifact_request and not raw_response.strip():
+        source_lines = [
+            f"- **{citation.guest_name}**: {citation.quote}"
+            for citation in citations
+        ]
+        fallback_content = "# Grounded Report\n\n## Retrieved Evidence\n\n"
+        fallback_content += "\n".join(source_lines) if source_lines else "No matching source evidence was retrieved."
+        artifact_data = {
+            "type": "markdown",
+            "title": "Grounded report from this chat",
+            "content": fallback_content,
+        }
+        cleaned_response = "Created a grounded report from the retrieved evidence. Open it in the artifact panel."
     if is_artifact_request and artifact_data is None:
         # Some providers ignore wrapper instructions. Preserve the requested output
         # as an artifact instead of leaking raw markup into the conversation.
@@ -129,6 +182,8 @@ async def chat_endpoint(request: ChatRequest, db: AsyncSession = Depends(get_db)
     
     # 7. Parse follow-ups
     final_response, follow_ups = extract_follow_up_questions(cleaned_response)
+    if is_artifact_request and not final_response.strip():
+        final_response = f"Created {artifact_data['title']}. Open it from the artifact button below."
 
     # 8. Persist messages
     citations_data = [c.model_dump() for c in citations]
@@ -144,7 +199,7 @@ async def chat_endpoint(request: ChatRequest, db: AsyncSession = Depends(get_db)
         session_id=session.id,
         role="assistant",
         content=final_response,
-        message_type="chat",
+        message_type="artifact" if artifact_data else "chat",
         citations=citations_data
     )
     db.add(asst_msg)
@@ -174,7 +229,7 @@ async def chat_endpoint(request: ChatRequest, db: AsyncSession = Depends(get_db)
         "citations": citations_data,
         "follow_ups": follow_ups,
         "provider": provider_name,
-        "model": model_name,
+        "model": resolved_model,
         "artifact_id": artifact_id,
         "artifact_data": artifact_data
     }
