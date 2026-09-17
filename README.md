@@ -1,13 +1,10 @@
-# 🚀 Lenny Growth Assistant
+# Lenny Growth Assistant
 
 <div align="center">
 
-![Lenny Growth Assistant](https://img.shields.io/badge/AI-Product%20%26%20Growth-blue?style=for-the-badge&logo=openai)
-![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker)
-![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi)
-![React](https://img.shields.io/badge/React-61DAFB?style=for-the-badge&logo=react&logoColor=black)
 
-**AI-powered Product & Growth Assistant grounded in Lenny's Podcast transcripts**
+
+**AI-powered Product & Growth Assistant grounded in Lenny's Podcast transcripts A take home assignment**
 
 [Quick Start](#-quick-start) • [Features](#-features) • [Architecture](#-architecture) • [Documentation](#-documentation)
 
@@ -19,18 +16,18 @@
 
 Lenny Growth Assistant is an intelligent chat application that helps you learn about product management and growth strategies from Lenny's extensive podcast library. Built with modern AI capabilities and vector search, it provides contextual, accurate answers grounded in real expert knowledge.
 
-### ✨ Key Highlights
+###  Key Highlights
 
-- 🧠 **RAG-Powered**: Vector search with pgvector for accurate, grounded responses
-- 🎨 **Artifact Generation**: Create documents, code, diagrams, and essays
-- 🔄 **Multi-Model Support**: Switch between OpenAI, Anthropic, Groq, or local Ollama
-- 📚 **Knowledge Base**: Upload custom documents and transcripts
-- 💾 **Session History**: Save and resume conversations
-- 🎯 **Production-Ready**: Fully containerized with Docker
+-  **RAG-Powered**: Vector search with pgvector for accurate, grounded responses
+-  **Artifact Generation**: Create documents, code, diagrams, and essays
+-  **Multi-Model Support**: Switch between OpenAI, Anthropic, Groq, or local Ollama
+-  **Knowledge Base**: Upload custom documents and transcripts
+-  **Session History**: Save and resume conversations
+-  **Production-Ready**: Fully containerized with Docker
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -79,7 +76,7 @@ Lenny Growth Assistant is an intelligent chat application that helps you learn a
 
 ---
 
-## 🎯 Features
+##  Features
 
 ### 💬 Intelligent Chat Interface
 - Natural language conversations about product and growth
@@ -87,27 +84,27 @@ Lenny Growth Assistant is an intelligent chat application that helps you learn a
 - Real-time streaming responses
 - Message history and follow-up questions
 
-### 🎨 Artifact System
+###  Artifact System
 Generate various types of content:
-- 📝 **Documents**: Reports, summaries, case studies
-- 💻 **Code**: Implementation examples, snippets
-- 📊 **Diagrams**: Flowcharts, architecture diagrams
-- ✍️ **Ship 30 Essays**: Twitter-style growth essays
+- **Documents**: Reports, summaries, case studies
+- **Code**: Implementation examples, snippets
+- **Diagrams**: Flowcharts, architecture diagrams
+- **Ship 30 Essays**: Twitter-style growth essays
 
-### 🔄 Multi-Model AI Support
+### Multi-Model AI Support
 Switch between providers on-the-fly:
 - **OpenAI**: GPT-4o, GPT-4o-mini, GPT-3.5-turbo
 - **Anthropic**: Claude 3.5 Sonnet, Claude 3 Opus/Haiku
 - **Groq**: Llama 3, Mixtral (super fast inference)
 - **Ollama**: Local models (qwen2.5-coder, llama3, etc.)
 
-### 📚 Knowledge Base Management
+###  Knowledge Base Management
 - Upload PDF documents and DOCX files
 - Ingest Lenny's podcast transcripts
 - Vector search with pgvector
 - Chunk-based retrieval for accuracy
 
-### 💾 Session Management
+###  Session Management
 - Save conversation history
 - Resume previous chats
 - Organize by date
@@ -155,7 +152,7 @@ Switch between providers on-the-fly:
 
 ---
 
-## 📦 Available Commands
+##  Available Commands
 
 ### Docker Commands
 
@@ -275,23 +272,8 @@ lenny-growth-assistant/
 
 ---
 
-## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
 
----
-
-## 📝 License
-
-This project is licensed under the MIT License.
-
----
-
-## 🙏 Acknowledgments
-
-- Built with insights from [Lenny's Podcast](https://www.lennyspodcast.com/)
-- Powered by OpenAI, Anthropic, and open-source AI models
-- Vector search by pgvector
 
 ---
 
